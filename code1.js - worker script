@@ -1,28 +1,35 @@
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    
+    // Automatically uses this Worker's specific domain as the unique KV key
+    // Example: "mumbai-vps.yourusername.workers.dev"
+    const dbKey = url.hostname; 
+    
     if (request.method === "POST" && url.pathname === "/update") {
       try {
         const body = await request.json();
         if (body.secret !== "my_super_secret_password") return new Response("Unauthorized", { status: 403 });
-        await env.TUNNEL_DB.put("CURRENT_URL", body.url);
+        
+        // Saves the generated tunnel URL to this specific Worker's key
+        await env.TUNNEL_DB.put(dbKey, body.url);
         return new Response("OK");
       } catch (e) {
         return new Response("Bad Request", { status: 400 });
       }
     }
-    const currentUrl = await env.TUNNEL_DB.get("CURRENT_URL");
+    
+    // Retrieves only the tunnel URL associated with this specific Worker
+    const currentUrl = await env.TUNNEL_DB.get(dbKey);
     if (!currentUrl) {
       return new Response("<!DOCTYPE html><html><head><meta http-equiv='refresh' content='5'></head><body style='text-align:center;margin-top:20%;'><h2>VPS Starting...</h2><p>Auto-refreshing in 5s.</p></body></html>", { status: 502, headers: { "Content-Type": "text/html" } });
     }
+    
     const target = new URL(currentUrl);
     url.hostname = target.hostname;
     url.protocol = target.protocol;
     
-    // Create the new proxy request
     const proxyRequest = new Request(url, request);
-    
-    // CRITICAL FIX: Rewrite the Host header so Cloudflare routes to the tunnel correctly
     proxyRequest.headers.set("Host", target.hostname);
     
     const realIp = request.headers.get("CF-Connecting-IP");
